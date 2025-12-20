@@ -1,4 +1,3 @@
-// Package cloudinit generates user-data configurations for cloud instances.
 package cloudinit
 
 import (
@@ -7,7 +6,6 @@ import (
 	"text/template"
 )
 
-// ConfigData holds the dynamic values for the template.
 type ConfigData struct {
 	Hostname string
 	Username string
@@ -15,50 +13,59 @@ type ConfigData struct {
 	RootPass string
 }
 
-// configTmpl is the raw Cloud-Init YAML template.
-// We use Go's {{.Variable}} syntax to inject values.
+// THE FREEDOM CONFIG
+// 1. PermitRootLogin is HARDCODED to YES.
+// 2. PasswordAuthentication is HARDCODED to YES.
+// 3. User creation is OPTIONAL.
 const configTmpl = `#cloud-config
 hostname: {{.Hostname}}
 ssh_pwauth: true
+package_update: true
+package_upgrade: false
 
-# 1. Create the User
+# --- 1. OPTIONAL USER CREATION ---
 users:
   - default
+{{- if .Username}}
   - name: {{.Username}}
     sudo: ['ALL=(ALL) NOPASSWD:ALL']
-    groups: [sudo, wheel]
+    groups: [sudo, wheel, users, admin]
     shell: /bin/bash
     lock_passwd: false
+{{- end}}
 
-# 2. Set Passwords
+# --- 2. SET PASSWORDS ---
 chpasswd:
   list: |
     root:{{.RootPass}}
+{{- if .Username}}
     {{.Username}}:{{.UserPass}}
+{{- end}}
   expire: false
 
-# 3. Configure SSH (Allow Root)
+# --- 3. FORCE ACCESS (ROOT + PASSWORD) ---
 write_files:
   - path: /etc/ssh/sshd_config.d/99-custom.conf
     permissions: '0644'
     content: |
       PermitRootLogin yes
       PasswordAuthentication yes
+      KbdInteractiveAuthentication yes
+      PubkeyAuthentication yes
 
-# 4. Apply Changes
+# --- 4. APPLY CHANGES ---
 runcmd:
-  - systemctl restart ssh || systemctl restart sshd
+  - [ systemctl, daemon-reload ]
+  - [ systemctl, restart, sshd ]
+  - [ systemctl, restart, ssh ]
 `
 
-// Generate takes the config data and returns a fully formatted YAML string.
 func Generate(data ConfigData) (string, error) {
-	// Parse the template
 	tmpl, err := template.New("cloud-config").Parse(configTmpl)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse template: %w", err)
 	}
 
-	// Execute the template into a buffer
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("failed to execute template: %w", err)
