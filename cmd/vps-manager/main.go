@@ -5,15 +5,17 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/Shaman786/vps-manager/internal/cloudinit"
+	"github.com/Shaman786/vps-manager/internal/images" // <--- Import Images
+	"github.com/Shaman786/vps-manager/internal/plans"
 	"github.com/Shaman786/vps-manager/internal/vm"
 )
 
 func main() {
-	// 1. Initialize the VM Manager
-	// We inject the storage paths here. This makes it easy to change later.
+	// 1. Initialize VM Manager
 	mgr := vm.NewManager(vm.ManagerConfig{
 		BaseImageDir: "/var/lib/libvirt/images/base",
 		VMDiskDir:    "/host-data/vms",
@@ -21,35 +23,59 @@ func main() {
 	})
 
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Println("=== VPS MANAGER v1.0 ===")
+	fmt.Println("=== VPS MANAGER v1.4 (Multi-OS Support) ===")
 
-	// 2. Gather User Input
-	vmName := readInput(reader, "Enter VM Name: ")
-	username := readInput(reader, "Enter Username: ")
+	// --- STEP 1: SELECT OS ---
+	fmt.Println("\nAvailable Operating Systems:")
+	for i, img := range images.Available {
+		fmt.Printf("[%d] %s\n", i+1, img.Name)
+	}
+	osIdxStr := readInput(reader, "Select OS [Enter Number]: ")
+	osIdx, _ := strconv.Atoi(osIdxStr)
+	if osIdx < 1 || osIdx > len(images.Available) {
+		log.Fatal("Invalid OS selection.")
+	}
+	selectedOS := images.Available[osIdx-1]
+
+	// --- STEP 2: SELECT PLAN ---
+	fmt.Println("\nAvailable Plans:")
+	for i, p := range plans.Available {
+		fmt.Printf("[%d] %s: %dMB RAM | %d vCPU | %s Disk\n", i+1, p.Name, p.RAM, p.CPUs, p.Disk)
+	}
+	planIdxStr := readInput(reader, "Select Plan [Enter Number]: ")
+	planIdx, _ := strconv.Atoi(planIdxStr)
+	if planIdx < 1 || planIdx > len(plans.Available) {
+		log.Fatal("Invalid plan selection.")
+	}
+	selectedPlan := plans.Available[planIdx-1]
+
+	// --- STEP 3: USER DETAILS ---
+	vmName := readInput(reader, "\nEnter VM Name: ")
+	username := readInput(reader, "Enter Customer Username: ")
 	userPass := readInput(reader, "Enter User Password: ")
 	rootPass := readInput(reader, "Enter Root Password: ")
 
-	// 3. Ensure we have the Base Image (Ubuntu 22.04)
-	// In a real app, you would let the user select this from a list.
-	fmt.Println("\n[1/4] Checking Base Image...")
+	// --- EXECUTION ---
+
+	// 1. Ensure Base Image (Downloads if missing)
+	fmt.Printf("\n[1/4] Checking Image: %s...\n", selectedOS.Name)
 	err := mgr.EnsureBaseImage(
-		"Ubuntu 22.04 LTS",
-		"https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img",
-		"ubuntu-22.04.img",
+		selectedOS.Name,
+		selectedOS.URL,
+		selectedOS.Filename,
 	)
 	if err != nil {
 		log.Fatalf("Failed to download image: %v", err)
 	}
 
-	// 4. Create the Disk (Copy-on-Write)
-	fmt.Println("[2/4] Provisioning Disk...")
-	// We default to 10GB for this demo
-	diskPath, err := mgr.CreateDisk(vmName, "ubuntu-22.04.img", "10G")
+	// 2. Create Disk (Using selected OS as backing file)
+	fmt.Printf("[2/4] Provisioning %s Disk...\n", selectedPlan.Disk)
+	diskPath, err := mgr.CreateDisk(vmName, selectedOS.Filename, selectedPlan.Disk)
 	if err != nil {
 		log.Fatalf("Failed to create disk: %v", err)
 	}
 
-	// 5. Generate Cloud-Init Config
+	// 3. Generate Cloud-Init
 	fmt.Println("[3/4] Generating Configuration...")
 	cfg, err := cloudinit.Generate(cloudinit.ConfigData{
 		Hostname: vmName,
@@ -60,25 +86,23 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to generate config: %v", err)
 	}
-
-	// Create the ISO file from that config
 	isoPath, err := mgr.CreateISO(vmName, cfg)
 	if err != nil {
 		log.Fatalf("Failed to create ISO: %v", err)
 	}
 
-	// 6. Launch the VM
-	fmt.Println("[4/4] Launching VM...")
-	// 2048MB RAM, 2 vCPUs
-	if err := mgr.Launch(vmName, 2048, 2, diskPath, isoPath); err != nil {
+	// 4. Launch VM
+	fmt.Printf("[4/4] Launching VM (%dMB RAM, %d vCPU)...\n", selectedPlan.RAM, selectedPlan.CPUs)
+	if err := mgr.Launch(vmName, selectedPlan.RAM, selectedPlan.CPUs, diskPath, isoPath); err != nil {
 		log.Fatalf("Failed to launch VM: %v", err)
 	}
 
 	fmt.Printf("\n✅ Success! VM '%s' is running.\n", vmName)
+	fmt.Printf("   OS:   %s\n", selectedOS.Name)
+	fmt.Printf("   Plan: %s\n", selectedPlan.Name)
 	fmt.Printf("Connect via: virsh console %s\n", vmName)
 }
 
-// Helper to read console input cleanly
 func readInput(r *bufio.Reader, prompt string) string {
 	fmt.Print(prompt)
 	input, _ := r.ReadString('\n')
