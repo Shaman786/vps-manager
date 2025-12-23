@@ -1,5 +1,5 @@
 
-
+```markdown
 # 🚀 HostPalace VPS Manager
 
 A professional-grade, terminal-based VPS management platform written in Go.
@@ -17,10 +17,10 @@ It automates the lifecycle of KVM virtual machines, handling disk provisioning (
 
 ## 🛠️ Prerequisites
 
-This tool is designed for **RHEL-based systems** (AlmaLinux 8/9, Rocky Linux, CentOS Stream, Fedora).
+Choose your operating system below to install the required dependencies.
 
-### 1. Install System Dependencies
-Run these commands as root to install KVM, Go, and required utilities:
+### Option A: RHEL / AlmaLinux / Rocky / Fedora
+Run as **root**:
 
 ```bash
 # 1. Enable Virtualization Tools
@@ -30,9 +30,9 @@ dnf install -y epel-release
 # 2. Install Core Tools
 dnf install -y virt-install qemu-img bridge-utils wget git
 
-# 3. Install Cloud-Init Utilities (Critical for ISO generation)
+# 3. Install Cloud-Init Utilities
 dnf install -y genisoimage
-# Manually install cloud-localds if missing from repo
+# Manually install cloud-localds
 curl -L -o /usr/local/bin/cloud-localds [https://raw.githubusercontent.com/canonical/cloud-utils/main/bin/cloud-localds](https://raw.githubusercontent.com/canonical/cloud-utils/main/bin/cloud-localds)
 chmod +x /usr/local/bin/cloud-localds
 
@@ -44,9 +44,27 @@ source ~/.bashrc
 
 ```
 
-### 2. Configure Firewall (For VNC)
+### Option B: Ubuntu / Debian
 
-To access the VNC remote desktop console from your PC, you must open the VNC port range (5900-5910).
+Run as **root** (sudo):
+
+```bash
+# 1. Install KVM & Tools
+sudo apt update
+sudo apt install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virtinst cloud-image-utils genisoimage git wget
+
+# 2. Install Go
+sudo snap install go --classic
+
+```
+
+---
+
+## 🛡️ Firewall Configuration (For VNC)
+
+To access the VNC remote desktop console, you must open ports **5900-5910**.
+
+**For RHEL / AlmaLinux:**
 
 ```bash
 firewall-cmd --permanent --add-port=5900-5910/tcp
@@ -54,9 +72,19 @@ firewall-cmd --reload
 
 ```
 
-### 3. Start KVM Services
+**For Ubuntu / Debian:**
 
-Ensure Libvirt is running:
+```bash
+sudo ufw allow 5900:5910/tcp
+sudo ufw reload
+
+```
+
+---
+
+## ⚙️ Service Setup
+
+Ensure the virtualization service is running.
 
 ```bash
 systemctl enable --now libvirtd
@@ -68,24 +96,43 @@ systemctl enable --now libvirtd
 ## 🌐 Network Setup (Bridge Mode)
 
 **Optional but Recommended.**
-By default, VMs use NAT (hidden IP). To make VMs appear on your main network (LAN) with their own real IP addresses, set up a Bridge.
+By default, VMs use **NAT** (hidden IP). To make VMs appear on your main LAN with their own real IPs, set up a Bridge.
+*Warning: configuring networking remotely carries a risk of disconnection.*
 
-**Warning:** Run this on the host server console. It might briefly disconnect SSH.
+### Option A: RHEL / AlmaLinux (using `nmcli`)
 
 ```bash
-# 1. Create a bridge interface named 'br0'
+# 1. Create bridge 'br0'
 nmcli con add type bridge ifname br0 con-name br0
 
-# 2. Attach your physical interface (e.g., eth0) to the bridge
+# 2. Attach physical interface (e.g., eth0)
 # REPLACE 'eth0' with your actual interface name (check 'ip a')
 nmcli con add type bridge-slave ifname eth0 master br0
 
-# 3. Activate the bridge
+# 3. Activate
 nmcli con up br0
 
 ```
 
-*Now, when creating a VPS, type `br0` when asked for the Bridge Interface.*
+### Option B: Ubuntu (using Netplan)
+
+Edit `/etc/netplan/00-installer-config.yaml` (example config):
+
+```yaml
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    eth0:
+      dhcp4: no
+  bridges:
+    br0:
+      interfaces: [eth0]
+      dhcp4: yes
+
+```
+
+Apply changes: `sudo netplan apply`
 
 ---
 
@@ -113,7 +160,7 @@ mv vps-manager /usr/local/bin/
 
 ## 🚀 Usage
 
-Run the tool as root (required for KVM access):
+Run the tool as root:
 
 ```bash
 vps-manager
@@ -154,7 +201,9 @@ vps-manager
 
 | Error | Fix |
 | --- | --- |
-| `exec: "cloud-localds": executable file not found` | You missed step 3 in Prerequisites. Install `genisoimage` and the `cloud-localds` script. |
+| `exec: "cloud-localds": executable file not found` | **RHEL:** Install `genisoimage` & manually download `cloud-localds`. <br>
+
+<br> **Ubuntu:** Install `cloud-image-utils`. |
 | `Permission denied` / `libvirt error` | You must run the tool as `root` (sudo). |
 | `VNC Connection Refused` | Check your firewall settings (Step 2). Ensure ports 5900+ are open. |
 | `No IP Address found` | Wait 30 seconds for the VM to boot. If using Bridge, ensure your router has DHCP enabled. |
