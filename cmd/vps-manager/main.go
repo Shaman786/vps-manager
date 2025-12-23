@@ -158,10 +158,9 @@ func listVPS() {
 	}
 	fmt.Println("\n(Note: IP addresses appear once the VM finishes booting)")
 }
-
 func manageVPS(r *bufio.Reader) {
 	vmName := readInput(r, "Enter VM Name to manage: ")
-
+	
 	fmt.Println("\n-- Actions --")
 	fmt.Println("1. Delete VM (Destroy & Remove Files)")
 	fmt.Println("2. Scale Resources (RAM/CPU)")
@@ -184,14 +183,20 @@ func manageVPS(r *bufio.Reader) {
 		}
 	case "3":
 		out, _ := exec.Command("virsh", "vncdisplay", vmName).Output()
-		port := strings.TrimSpace(string(out))
-		if port == "" {
+		portOutput := strings.TrimSpace(string(out))
+		
+		if portOutput == "" {
 			fmt.Println("❌ Could not find VNC port. Is the VM running?")
 		} else {
-			// VNC ports usually look like :0, :1. The actual port is 5900 + N.
-			cleanPort := strings.ReplaceAll(port, ":", "")
-			fmt.Printf("\n🖥️  VNC Display: %s\n", port)
-			fmt.Printf("   Connect via VNC Viewer to: YOUR_SERVER_IP:59%s\n", cleanPort)
+			// FIX: Calculate the real port (5900 + Display Number)
+			// Output is usually ":0", ":1", etc.
+			clean := strings.ReplaceAll(portOutput, ":", "")
+			displayNum, _ := strconv.Atoi(clean)
+			realPort := 5900 + displayNum
+
+			fmt.Printf("\n🖥️  VNC Display: %s\n", portOutput)
+			fmt.Printf("   Connect via VNC Viewer to: YOUR_SERVER_IP:%d\n", realPort)
+			fmt.Println("   (Ensure firewall allows ports 5900-5999)")
 		}
 	}
 }
