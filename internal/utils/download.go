@@ -8,19 +8,20 @@ import (
 )
 
 func DownloadFile(url string, filepath string) error {
-	out, err :=
-		os.Create(filepath)
+	out, err := os.Create(filepath)
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	// Get the data
 	resp, err := http.Get(url)
 	if err != nil {
 		return fmt.Errorf("failed to download from %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("bad status: %s", resp.Status)

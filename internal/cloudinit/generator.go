@@ -1,3 +1,4 @@
+// Package cloudinit generates user-data and meta-data configuration files for VMs.
 package cloudinit
 
 import (
@@ -7,14 +8,15 @@ import (
 )
 
 type ConfigData struct {
-	Hostname string
-	Username string
-	UserPass string
-	RootPass string
+	Hostname       string
+	Username       string
+	UserPass       string
+	RootPass       string
+	AllowRootLogin bool // New Field
 }
 
 // THE FREEDOM CONFIG
-// 1. PermitRootLogin is HARDCODED to YES.
+// 1. PermitRootLogin is DYNAMIC now.
 // 2. PasswordAuthentication is HARDCODED to YES.
 // 3. User creation is OPTIONAL.
 // 4. FIX APPLIED: Smart SSH restart logic in runcmd.
@@ -44,12 +46,12 @@ chpasswd:
 {{- end}}
   expire: false
 
-# --- 3. FORCE ACCESS (ROOT + PASSWORD) ---
+# --- 3. SSH CONFIGURATION ---
 write_files:
   - path: /etc/ssh/sshd_config.d/99-custom.conf
     permissions: '0644'
     content: |
-      PermitRootLogin yes
+      PermitRootLogin {{if .AllowRootLogin}}yes{{else}}no{{end}}
       PasswordAuthentication yes
       KbdInteractiveAuthentication yes
       PubkeyAuthentication yes
@@ -57,8 +59,7 @@ write_files:
 # --- 4. APPLY CHANGES ---
 runcmd:
   - [ systemctl, daemon-reload ]
-  # FIX: Try 'sshd' (Fedora/RHEL), if that fails try 'ssh' (Ubuntu/Debian),
-  # and if both fail, return true so cloud-init doesn't report an error.
+  # Restart SSH to apply the PermitRootLogin change
   - [ sh, -c, "systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true" ]
 `
 

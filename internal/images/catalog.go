@@ -33,15 +33,29 @@ var (
 // Config: How often to force a web scrape? (e.g., 24 Hours)
 const CacheDuration = 24 * time.Hour
 
-func GetCachePath() string {
-	home, _ := os.UserHomeDir()
+// GetCachePath returns the path and handles directory creation errors
+func GetCachePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get user home: %w", err)
+	}
+
 	dir := filepath.Join(home, ".vps-manager")
-	os.MkdirAll(dir, 0o755)
-	return filepath.Join(dir, "catalog.json")
+
+	// FIX: Return error if mkdir fails
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("failed to create directory %s: %w", dir, err)
+	}
+
+	return filepath.Join(dir, "catalog.json"), nil
 }
 
 func RefreshCatalog() error {
-	cacheFile := GetCachePath()
+	cacheFile, err := GetCachePath()
+	if err != nil {
+		fmt.Printf("⚠️ Warning: Cache issue: %v\n", err)
+		return scrapeAll()
+	}
 	info, err := os.Stat(cacheFile)
 
 	// 1. Try to Load from Cache
@@ -62,8 +76,12 @@ func RefreshCatalog() error {
 
 	// 3. Save to Cache
 	data, _ := json.MarshalIndent(Catalog, "", "  ")
-	os.WriteFile(cacheFile, data, 0o644)
-	fmt.Printf("✅ Catalog cached to %s\n", cacheFile)
+	// FIX: Check error on WriteFile
+	if err := os.WriteFile(cacheFile, data, 0o644); err != nil {
+		fmt.Printf("⚠️ Warning: Could not save catalog cache: %v\n", err)
+	} else {
+		fmt.Printf("✅ Catalog cached to %s\n", cacheFile)
+	}
 	return nil
 }
 
@@ -134,7 +152,7 @@ func fetchDebian() {
 	}
 }
 
-// 3. RHEL CLONES (Fixed for Rocky 10)
+// 3. RHEL CLONES
 func fetchRHELClones() {
 	for ver := 8; ver < 12; ver++ {
 		vStr := strconv.Itoa(ver)
@@ -146,16 +164,12 @@ func fetchRHELClones() {
 		}
 
 		// --- Rocky Linux ---
-		// Pattern A (Standard for 8/9): Rocky-9-GenericCloud.latest.x86_64.qcow2
 		urlR1 := fmt.Sprintf("https://dl.rockylinux.org/pub/rocky/%d/images/x86_64/Rocky-%d-GenericCloud.latest.x86_64.qcow2", ver, ver)
-
-		// Pattern B (New for 10): Rocky-10-GenericCloud-Base.latest.x86_64.qcow2
 		urlR2 := fmt.Sprintf("https://dl.rockylinux.org/pub/rocky/%d/images/x86_64/Rocky-%d-GenericCloud-Base.latest.x86_64.qcow2", ver, ver)
 
 		if checkURL(urlR1) {
 			addImage(OSImage{Name: "Rocky Linux " + vStr, Distro: "rocky", Version: vStr, Filename: "rocky-" + vStr + ".qcow2", DownloadURL: urlR1, IsLTS: true})
 		} else if checkURL(urlR2) {
-			// Found the "Base" variant (Rocky 10)
 			addImage(OSImage{Name: "Rocky Linux " + vStr, Distro: "rocky", Version: vStr, Filename: "rocky-" + vStr + ".qcow2", DownloadURL: urlR2, IsLTS: true})
 		}
 
@@ -238,7 +252,8 @@ func scrapeHTML(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer r.Body.Close()
+	// FIX: Explicitly ignore error in defer to satisfy linter
+	defer func() { _ = r.Body.Close() }()
 	b, err := io.ReadAll(r.Body)
 	return string(b), err
 }
@@ -246,5 +261,10 @@ func scrapeHTML(url string) (string, error) {
 func checkURL(url string) bool {
 	c := http.Client{Timeout: 2 * time.Second}
 	r, err := c.Head(url)
-	return err == nil && r.StatusCode == 200
+	if err != nil {
+		return false
+	}
+	// FIX: Explicitly ignore error in defer to satisfy linter
+	defer func() { _ = r.Body.Close() }()
+	return r.StatusCode == 200
 }

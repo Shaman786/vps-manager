@@ -20,7 +20,11 @@ func GetLatestFedora() (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("mirror unreachable: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			fmt.Printf("Warning: Failed to close body: %v\n", err)
+		}
+	}()
 	body, _ := io.ReadAll(resp.Body)
 
 	// Regex to match directory links like "41/", "42/", "43/"
@@ -50,7 +54,7 @@ func GetLatestFedora() (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("failed to open image dir: %w", err)
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 	body2, _ := io.ReadAll(resp2.Body)
 
 	// Regex to match "Fedora-Cloud-Base-Generic-43-1.6.x86_64.qcow2"

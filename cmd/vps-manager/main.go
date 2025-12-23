@@ -56,7 +56,11 @@ func main() {
 		case "4":
 			createBridge(reader)
 		case "5":
-			images.RefreshCatalog()
+			if err := images.RefreshCatalog(); err != nil {
+				fmt.Printf("❌ Failed to refresh: %v\n", err)
+			} else {
+				fmt.Println("✅ Catalog updated.")
+			}
 		case "0":
 			fmt.Println("Goodbye!")
 			os.Exit(0)
@@ -69,7 +73,7 @@ func main() {
 // --- FEATURE FUNCTIONS ---
 
 func createVPS(r *bufio.Reader) {
-	// 1. Select OS (Dynamic List)
+	// 1. Select OS
 	fmt.Println("\n-- Select Operating System --")
 	if len(images.Catalog) == 0 {
 		fmt.Println("❌ No images found. Try 'Refresh Catalog' first.")
@@ -92,12 +96,42 @@ func createVPS(r *bufio.Reader) {
 		fmt.Printf("[%d] %s (RAM: %dMB, CPU: %d)\n", i+1, p.Name, p.RAM, p.CPUs)
 	}
 	idx2, _ := strconv.Atoi(readInput(r, "Choice: "))
+	if idx2 < 1 || idx2 > len(plans.Available) {
+		fmt.Println("❌ Invalid plan.")
+		return
+	}
 	selectedPlan := plans.Available[idx2-1]
 
-	// 3. VM Details
+	// 3. VM Details & Credentials
+	fmt.Println("\n-- Configuration --")
 	name := readInput(r, "VM Name: ")
-	user := readInput(r, "Username: ")
-	pass := readPassword("Password: ")
+
+	// --- NEW LOGIC START ---
+	var username, userPass, rootPass string
+	var allowRoot bool
+
+	// Ask if they want a user
+	createUsers := strings.ToLower(readInput(r, "Create a dedicated User (e.g. admin)? [y/N]: "))
+	if createUsers == "y" || createUsers == "yes" {
+		// A. User + Root Password
+		username = readInput(r, "Enter Username: ")
+		userPass = readPasswordConfirm("Set User Password: ")
+		rootPass = readPasswordConfirm("Set Root Password: ")
+
+		// Ask about Root SSH Access
+		sshRoot := strings.ToLower(readInput(r, "Allow Root SSH Login? (Not Recommended) [y/N]: "))
+		if sshRoot == "y" || sshRoot == "yes" {
+			allowRoot = true
+		} else {
+			allowRoot = false
+		}
+	} else {
+		// B. Root Only (Obvious yes for SSH login)
+		fmt.Println("⚠️  No user created. You will log in as 'root'.")
+		rootPass = readPasswordConfirm("Set Root Password: ")
+		allowRoot = true // Forced yes
+	}
+	// --- NEW LOGIC END ---
 
 	// 4. Network Mode
 	bridgeName := ""
@@ -121,9 +155,16 @@ func createVPS(r *bufio.Reader) {
 	}
 
 	fmt.Println("[3/4] Generating Configuration...")
-	// Generate Cloud-Init Config
-	cfg, _ := cloudinit.Generate(cloudinit.ConfigData{Hostname: name, Username: user, RootPass: pass})
-	// Generate Meta-Data (Fixes the localhost hostname issue)
+	// Generate Cloud-Init Config with the new AllowRootLogin flag
+	cfg, _ := cloudinit.Generate(cloudinit.ConfigData{
+		Hostname:       name,
+		Username:       username,
+		UserPass:       userPass,
+		RootPass:       rootPass,
+		AllowRootLogin: allowRoot,
+	})
+
+	// Generate Meta-Data
 	metaData := fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", name, name)
 	iso, err := mgr.CreateISO(name, cfg, metaData)
 	if err != nil {
@@ -141,7 +182,6 @@ func createVPS(r *bufio.Reader) {
 }
 
 func listVPS() {
-	// List all VMs (running and stopped)
 	cmd := exec.Command("virsh", "list", "--all", "--name")
 	out, _ := cmd.Output()
 	vms := strings.Split(strings.TrimSpace(string(out)), "\n")
@@ -158,9 +198,10 @@ func listVPS() {
 	}
 	fmt.Println("\n(Note: IP addresses appear once the VM finishes booting)")
 }
+
 func manageVPS(r *bufio.Reader) {
 	vmName := readInput(r, "Enter VM Name to manage: ")
-	
+
 	fmt.Println("\n-- Actions --")
 	fmt.Println("1. Delete VM (Destroy & Remove Files)")
 	fmt.Println("2. Scale Resources (RAM/CPU)")
@@ -170,8 +211,11 @@ func manageVPS(r *bufio.Reader) {
 	switch choice {
 	case "1":
 		if readInput(r, "Are you sure? This cannot be undone (yes/no): ") == "yes" {
-			mgr.DeleteVM(vmName)
-			fmt.Println("✅ VM Deleted.")
+			if err := mgr.DeleteVM(vmName); err != nil {
+				fmt.Printf("⚠️ Could not delete VM cleanly: %v\n", err)
+			} else {
+				fmt.Println("✅ VM Deleted.")
+			}
 		}
 	case "2":
 		ram, _ := strconv.Atoi(readInput(r, "New RAM (MB): "))
@@ -184,12 +228,10 @@ func manageVPS(r *bufio.Reader) {
 	case "3":
 		out, _ := exec.Command("virsh", "vncdisplay", vmName).Output()
 		portOutput := strings.TrimSpace(string(out))
-		
+
 		if portOutput == "" {
 			fmt.Println("❌ Could not find VNC port. Is the VM running?")
 		} else {
-			// FIX: Calculate the real port (5900 + Display Number)
-			// Output is usually ":0", ":1", etc.
 			clean := strings.ReplaceAll(portOutput, ":", "")
 			displayNum, _ := strconv.Atoi(clean)
 			realPort := 5900 + displayNum
@@ -222,9 +264,27 @@ func readInput(r *bufio.Reader, prompt string) string {
 	return strings.TrimSpace(input)
 }
 
+// readPassword is used internally by readPasswordConfirm
 func readPassword(prompt string) string {
 	fmt.Print(prompt)
 	bytePassword, _ := term.ReadPassword(int(syscall.Stdin))
 	fmt.Println()
 	return string(bytePassword)
+}
+
+// readPasswordConfirm enforces double-entry verification
+func readPasswordConfirm(prompt string) string {
+	for {
+		p1 := readPassword(prompt)
+		p2 := readPassword("Confirm Password: ")
+
+		if p1 == "" {
+			fmt.Println("❌ Password cannot be empty.")
+			continue
+		}
+		if p1 == p2 {
+			return p1
+		}
+		fmt.Println("❌ Passwords do not match. Try again.")
+	}
 }
