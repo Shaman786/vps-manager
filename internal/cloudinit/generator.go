@@ -17,6 +17,7 @@ type ConfigData struct {
 // 1. PermitRootLogin is HARDCODED to YES.
 // 2. PasswordAuthentication is HARDCODED to YES.
 // 3. User creation is OPTIONAL.
+// 4. FIX APPLIED: Smart SSH restart logic in runcmd.
 const configTmpl = `#cloud-config
 hostname: {{.Hostname}}
 ssh_pwauth: true
@@ -56,8 +57,9 @@ write_files:
 # --- 4. APPLY CHANGES ---
 runcmd:
   - [ systemctl, daemon-reload ]
-  - [ systemctl, restart, sshd ]
-  - [ systemctl, restart, ssh ]
+  # FIX: Try 'sshd' (Fedora/RHEL), if that fails try 'ssh' (Ubuntu/Debian),
+  # and if both fail, return true so cloud-init doesn't report an error.
+  - [ sh, -c, "systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true" ]
 `
 
 func Generate(data ConfigData) (string, error) {

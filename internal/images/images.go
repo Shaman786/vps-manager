@@ -50,10 +50,10 @@ var Available = []OSImage{
 
 	// --- BLEEDING EDGE ---
 	{
-		Name: "Fedora 41 Cloud",
+		Name: "Fedora Cloud (Bleeding Edge)",
 		// Fedora updates filenames frequently, so we use a specific stable version here to prevent 404s
-		URL:      "https://download.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-41-1.4.x86_64.qcow2",
-		Filename: "fedora-41.qcow2",
+		URL:      "DYNAMIC_FEDORA",
+		Filename: "fedora-latest.qcow2",
 	},
 	{
 		Name:     "Arch Linux (Rolling)",

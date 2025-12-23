@@ -7,11 +7,14 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/Shaman786/vps-manager/internal/cloudinit"
 	"github.com/Shaman786/vps-manager/internal/images" // <--- Import Images
 	"github.com/Shaman786/vps-manager/internal/plans"
+	"github.com/Shaman786/vps-manager/internal/utils"
 	"github.com/Shaman786/vps-manager/internal/vm"
+	"golang.org/x/term"
 )
 
 func main() {
@@ -52,13 +55,28 @@ func main() {
 	// --- STEP 3: USER DETAILS ---
 	vmName := readInput(reader, "\nEnter VM Name: ")
 	username := readInput(reader, "Enter Customer Username: ")
-	userPass := readInput(reader, "Enter User Password: ")
-	rootPass := readInput(reader, "Enter Root Password: ")
+	userPass := readPassword("Enter User Password: ")
+	rootPass := readPassword("Enter Root Password: ")
 
 	// --- EXECUTION ---
 
 	// 1. Ensure Base Image (Downloads if missing)
+	// 1. Ensure Base Image (Downloads if missing)
 	fmt.Printf("\n[1/4] Checking Image: %s...\n", selectedOS.Name)
+
+	// --- NEW: DYNAMIC FEDORA CHECK ---
+	if selectedOS.URL == "DYNAMIC_FEDORA" {
+		// Run the scraper
+		realURL, realFilename, err := utils.GetLatestFedora()
+		if err != nil {
+			log.Fatalf("Failed to resolve Fedora version: %v", err)
+		}
+		// Update the struct with the real data found on the website
+		selectedOS.URL = realURL
+		selectedOS.Filename = realFilename
+	}
+	// ---------------------------------
+
 	err := mgr.EnsureBaseImage(
 		selectedOS.Name,
 		selectedOS.URL,
@@ -107,4 +125,14 @@ func readInput(r *bufio.Reader, prompt string) string {
 	fmt.Print(prompt)
 	input, _ := r.ReadString('\n')
 	return strings.TrimSpace(input)
+}
+
+func readPassword(prompt string) string {
+	fmt.Print(prompt)
+	bytePassword, err := term.ReadPassword(int(syscall.Stdin))
+	if err != nil {
+		return ""
+	}
+	fmt.Println()
+	return string(bytePassword)
 }
