@@ -1,4 +1,3 @@
-
 ```markdown
 # 🚀 HostPalace VPS Manager
 
@@ -15,11 +14,30 @@ It automates the lifecycle of KVM virtual machines, handling disk provisioning (
 
 ---
 
-## 🛠️ Prerequisites
+## ⚡ Quick Install (One-Line)
 
-Choose your operating system below to install the required dependencies.
+Install everything (Dependencies, Go, Firewall Rules, and the Tool) with a single command:
+
+```bash
+curl -fsSL [https://raw.githubusercontent.com/shaman786/vps-manager/main/setup.sh](https://raw.githubusercontent.com/shaman786/vps-manager/main/setup.sh) | sudo bash
+
+```
+
+Once finished, simply run:
+
+```bash
+vps-manager
+
+```
+
+---
+
+## 🛠️ Prerequisites (Manual Install)
+
+If you prefer to install manually, choose your operating system below.
 
 ### Option A: RHEL / AlmaLinux / Rocky / Fedora
+
 Run as **root**:
 
 ```bash
@@ -205,7 +223,7 @@ vps-manager
 
 <br> **Ubuntu:** Install `cloud-image-utils`. |
 | `Permission denied` / `libvirt error` | You must run the tool as `root` (sudo). |
-| `VNC Connection Refused` | Check your firewall settings (Step 2). Ensure ports 5900+ are open. |
+| `VNC Connection Refused` | Check your firewall settings. Ensure ports 5900+ are open. |
 | `No IP Address found` | Wait 30 seconds for the VM to boot. If using Bridge, ensure your router has DHCP enabled. |
 
 ---
