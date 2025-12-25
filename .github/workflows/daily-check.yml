@@ -1,0 +1,27 @@
+name: Daily OS Image Check
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+jobs:
+  check-releases:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install Dependencies
+        run: go mod tidy
+
+      - name: Run Watcher
+        env:
+          # THIS IS THE MAGIC PART
+          VPS_IP: ${{ secrets.VPS_IP }}
+        run: go run cmd/watcher/main.go
