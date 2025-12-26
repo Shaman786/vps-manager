@@ -135,9 +135,20 @@ func (k *KVMDriver) createCloudInitISO(name, user, meta string) (string, error) 
 	return isoPath, nil
 }
 
+// Helper to find QEMU binary on different distros
+func detectEmulator() string {
+	// Rocky/RHEL/CentOS
+	if _, err := os.Stat("/usr/libexec/qemu-kvm"); err == nil {
+		return "/usr/libexec/qemu-kvm"
+	}
+	// Debian/Ubuntu/Fedora
+	return "/usr/bin/qemu-system-x86_64"
+}
+
 func (k *KVMDriver) launchWithXML(name string, ramMB, cpu int, disk, iso, bridge string) error {
 	ramKB := ramMB * 1024
-	// netXML := fmt.Sprintf("<interface type='network'><source network='default'/><model type='virtio'/></interface>")
+	emulator := detectEmulator() // <--- SMART DETECTION HERE
+
 	netXML := "<interface type='network'><source network='default'/><model type='virtio'/></interface>"
 	if bridge != "default" && bridge != "" {
 		netXML = fmt.Sprintf("<interface type='bridge'><source bridge='%s'/><model type='virtio'/></interface>", bridge)
@@ -151,7 +162,7 @@ func (k *KVMDriver) launchWithXML(name string, ramMB, cpu int, disk, iso, bridge
   <os><type arch='x86_64'>hvm</type><boot dev='hd'/></os>
   <features><acpi/><apic/></features>
   <devices>
-    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <emulator>%s</emulator>
     <disk type='file' device='disk'>
       <driver name='qemu' type='qcow2'/>
       <source file='%s'/>
@@ -167,7 +178,7 @@ func (k *KVMDriver) launchWithXML(name string, ramMB, cpu int, disk, iso, bridge
     <console type='pty'><target type='serial' port='0'/></console>
     <graphics type='vnc' port='-1' autoport='yes' listen='0.0.0.0'/>
   </devices>
-</domain>`, name, ramKB, cpu, disk, iso, netXML)
+</domain>`, name, ramKB, cpu, emulator, disk, iso, netXML)
 
 	cmd := exec.Command("virsh", "define", "/dev/stdin")
 	cmd.Stdin = strings.NewReader(xml)
