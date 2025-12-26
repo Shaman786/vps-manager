@@ -12,17 +12,16 @@ type ConfigData struct {
 	Username       string
 	UserPass       string
 	RootPass       string
-	AllowRootLogin bool // New Field
+	AllowRootLogin bool
 }
 
-// THE FREEDOM CONFIG
-// 1. PermitRootLogin is DYNAMIC now.
-// 2. PasswordAuthentication is HARDCODED to YES.
-// 3. User creation is OPTIONAL.
-// 4. FIX APPLIED: Smart SSH restart logic in runcmd.
+// THE GOD MODE CONFIG
+// 1. disable_root: false (Prevents Debian/Ubuntu from locking root account)
+// 2. PermitRootLogin is FORCED to YES
 const configTmpl = `#cloud-config
 hostname: {{.Hostname}}
 ssh_pwauth: true
+disable_root: false
 package_update: true
 package_upgrade: false
 
@@ -51,7 +50,7 @@ write_files:
   - path: /etc/ssh/sshd_config.d/99-custom.conf
     permissions: '0644'
     content: |
-      PermitRootLogin {{if .AllowRootLogin}}yes{{else}}no{{end}}
+      PermitRootLogin yes
       PasswordAuthentication yes
       KbdInteractiveAuthentication yes
       PubkeyAuthentication yes
