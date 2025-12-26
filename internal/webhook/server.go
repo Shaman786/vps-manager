@@ -12,10 +12,44 @@ import (
 )
 
 func Start(mgr *vm.Manager, store *images.Store, port string) {
-	// 1. IMAGE WEBHOOK
+	// 1. IMAGE WEBHOOK (Legacy/Automated)
 	http.HandleFunc("/webhook", handleImageWebhook(store))
 
-	// 2. VM API
+	// 2. IMAGE API (Manual Registration - NEW ADDITION)
+	http.HandleFunc("/api/images", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", 405)
+			return
+		}
+		var req struct {
+			ID     string `json:"id"`
+			URL    string `json:"url"`
+			Format string `json:"format"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON", 400)
+			return
+		}
+
+		fmt.Printf("📥 Manual Image Registration: %s\n", req.ID)
+		
+		// Register and immediately trigger download
+		store.Register(req.ID, req.URL, req.Format)
+		go func() {
+			fmt.Printf("⬇️  Downloading image: %s...\n", req.ID)
+			// FIX: Ignore the first return value (path) with '_'
+			if _, err := store.Resolve(req.ID); err != nil {
+				fmt.Printf("❌ Download failed for %s: %v\n", req.ID, err)
+			} else {
+				fmt.Printf("✅ Image ready: %s\n", req.ID)
+			}
+		}()
+
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]string{"status": "downloading", "id": req.ID})
+	})
+
+	// 3. VM API
 	http.HandleFunc("/api/vms", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -26,13 +60,12 @@ func Start(mgr *vm.Manager, store *images.Store, port string) {
 		}
 
 		if r.Method == http.MethodPost {
-			// Parse the new Rich Request
 			var req struct {
 				Name     string `json:"name"`
 				Image    string `json:"image"`
-				Plan     string `json:"plan"`     // "Starter"
-				Username string `json:"username"` // "fh"
-				Password string `json:"password"` // "securepass"
+				Plan     string `json:"plan"`
+				Username string `json:"username"`
+				Password string `json:"password"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, "Invalid JSON", 400)
@@ -40,15 +73,9 @@ func Start(mgr *vm.Manager, store *images.Store, port string) {
 			}
 
 			// Defaults
-			if req.Plan == "" {
-				req.Plan = "Starter"
-			}
-			if req.Username == "" {
-				req.Username = "root"
-			}
-			if req.Password == "" {
-				req.Password = "password"
-			} // Unsafe default, but good for demo
+			if req.Plan == "" { req.Plan = "Starter" }
+			if req.Username == "" { req.Username = "root" }
+			if req.Password == "" { req.Password = "password" }
 
 			opts := vm.CreateOptions{
 				Name:     req.Name,
@@ -66,7 +93,7 @@ func Start(mgr *vm.Manager, store *images.Store, port string) {
 		}
 	})
 
-	// 3. ACTION API
+	// 4. ACTION API
 	http.HandleFunc("/api/vms/action", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", 405)
@@ -89,7 +116,6 @@ func Start(mgr *vm.Manager, store *images.Store, port string) {
 	log.Fatal(http.ListenAndServe(port, nil))
 }
 
-// ... (Helper functions remain same) ...
 func handleImageWebhook(store *images.Store) http.HandlerFunc {
 	type LegacyImageRelease struct {
 		Distro  string `json:"distro"`
