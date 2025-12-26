@@ -2,8 +2,11 @@ package vm
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/Shaman786/vps-manager/internal/cloudinit"
 	"github.com/Shaman786/vps-manager/internal/core"
+	"github.com/Shaman786/vps-manager/internal/plans"
 )
 
 type Manager struct {
@@ -14,33 +17,71 @@ func NewManager(driver core.HypervisorDriver) *Manager {
 	return &Manager{Driver: driver}
 }
 
-// Update: Now accepts 'image' argument
-func (m *Manager) CreateServer(name, image, region string) error {
+// CreateOptions packages all the user's desires
+type CreateOptions struct {
+	Name     string
+	Image    string
+	PlanName string // "Starter", "Professional"
+	Username string // "admin"
+	Password string // "secret123"
+}
 
-	// Default to Ubuntu if empty
-	if image == "" {
-		image = "ubuntu-24.04"
+// CreateServer now orchestrates Plans + CloudInit + Driver
+func (m *Manager) CreateServer(opts CreateOptions) error {
+	// 1. FIND THE PLAN
+	// We look up CPU/RAM/Disk from your plans.go file
+	var selectedPlan plans.VMPlan
+	found := false
+	for _, p := range plans.Available {
+		if strings.EqualFold(p.Name, opts.PlanName) {
+			selectedPlan = p
+			found = true
+			break
+		}
+	}
+	if !found {
+		// Fallback to first plan if invalid
+		selectedPlan = plans.Available[0]
+		fmt.Printf("⚠️  Plan '%s' not found. Defaulting to %s.\n", opts.PlanName, selectedPlan.Name)
 	}
 
+	// 2. PARSE DISK SIZE
+	// plans.go has "10G", core needs int(10). Simple parse:
+	var diskInt int
+	fmt.Sscanf(selectedPlan.Disk, "%dG", &diskInt)
+
+	// 3. GENERATE CLOUD-INIT
+	// We use your new generator.go logic
+	configData := cloudinit.ConfigData{
+		Hostname:       opts.Name,
+		Username:       opts.Username,
+		UserPass:       opts.Password,
+		RootPass:       opts.Password, // Sync root pass for now
+		AllowRootLogin: true,
+	}
+
+	userData, err := cloudinit.Generate(configData)
+	if err != nil {
+		return fmt.Errorf("failed to generate cloud-config: %w", err)
+	}
+
+	// 4. ASSEMBLE THE ORDER
 	config := core.VMConfig{
-		Name:     name,
-		Image:    image, // <--- Uses the argument now
-		CPUCores: 1,
-		RAM:      1024,
-		DiskSize: 10,
+		Name:     opts.Name,
+		Image:    opts.Image,
+		CPUCores: selectedPlan.CPUs,
+		RAM:      selectedPlan.RAM,
+		DiskSize: diskInt,
 		Network:  "default",
-		UserData: fmt.Sprintf(`#cloud-config
-hostname: %s
-ssh_pwauth: True
-password: password
-chpasswd: { expire: False }`, name),
-		MetaData: fmt.Sprintf("instance-id: %s", name),
+		UserData: userData,
+		MetaData: fmt.Sprintf("instance-id: %s\nlocal-hostname: %s", opts.Name, opts.Name),
 	}
 
-	fmt.Printf("manager: requesting %s to create VM '%s' (%s)...\n", m.Driver.Name(), name, image)
+	fmt.Printf("📦 PROVISIONING: %s | %s | %s\n", opts.Name, selectedPlan.Name, opts.Image)
 	return m.Driver.CreateVM(config)
 }
 
+// ... (ListServers and PerformAction remain unchanged) ...
 func (m *Manager) ListServers() ([]core.VMState, error) {
 	ids, err := m.Driver.ListVMs()
 	if err != nil {

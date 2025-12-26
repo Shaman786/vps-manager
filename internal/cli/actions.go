@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/Shaman786/vps-manager/internal/vm"
 )
 
-// ... (Keep handleListVMs as is) ...
+// ... (ListVMs remains same) ...
 func (a *App) handleListVMs() {
 	vms, err := a.mgr.ListServers()
 	if err != nil {
@@ -31,11 +33,33 @@ func (a *App) handleCreateVM() {
 	fmt.Print("Image (default: ubuntu-24.04): ")
 	image, _ := reader.ReadString('\n')
 	image = strings.TrimSpace(image)
+	if image == "" {
+		image = "ubuntu-24.04"
+	}
 
-	fmt.Printf("Creating VM '%s' using %s...\n", name, image)
+	fmt.Print("Plan [Starter/Professional]: ")
+	plan, _ := reader.ReadString('\n')
+	plan = strings.TrimSpace(plan)
+	if plan == "" {
+		plan = "Starter"
+	}
 
-	// Update: Pass the image argument
-	if err := a.mgr.CreateServer(name, image, "local"); err != nil {
+	fmt.Print("Root Password: ")
+	pass, _ := reader.ReadString('\n')
+	pass = strings.TrimSpace(pass)
+
+	// Build the Options Struct
+	opts := vm.CreateOptions{
+		Name:     name,
+		Image:    image,
+		PlanName: plan,
+		Username: "root", // Defaulting to root for CLI simplicity
+		Password: pass,
+	}
+
+	fmt.Printf("\n🚀 Creating %s (%s) on %s...\n", name, plan, image)
+
+	if err := a.mgr.CreateServer(opts); err != nil {
 		fmt.Printf("❌ Failed: %v\n", err)
 	} else {
 		fmt.Println("✅ VM Created Successfully!")

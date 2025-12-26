@@ -12,34 +12,53 @@ import (
 )
 
 func Start(mgr *vm.Manager, store *images.Store, port string) {
-	// 1. IMAGE WEBHOOK (Keep this!)
+	// 1. IMAGE WEBHOOK
 	http.HandleFunc("/webhook", handleImageWebhook(store))
 
-	// 2. VM LIST & CREATE API (New!)
+	// 2. VM API
 	http.HandleFunc("/api/vms", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		if r.Method == http.MethodGet {
-			// LIST
 			vms, _ := mgr.ListServers()
 			json.NewEncoder(w).Encode(vms)
 			return
 		}
 
 		if r.Method == http.MethodPost {
-			// CREATE
+			// Parse the new Rich Request
 			var req struct {
-				Name   string `json:"name"`
-				Image  string `json:"image"`
-				Region string `json:"region"`
+				Name     string `json:"name"`
+				Image    string `json:"image"`
+				Plan     string `json:"plan"`     // "Starter"
+				Username string `json:"username"` // "fh"
+				Password string `json:"password"` // "securepass"
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, "Invalid JSON", 400)
 				return
 			}
 
-			// Call Manager with the specific image
-			if err := mgr.CreateServer(req.Name, req.Image, req.Region); err != nil {
+			// Defaults
+			if req.Plan == "" {
+				req.Plan = "Starter"
+			}
+			if req.Username == "" {
+				req.Username = "root"
+			}
+			if req.Password == "" {
+				req.Password = "password"
+			} // Unsafe default, but good for demo
+
+			opts := vm.CreateOptions{
+				Name:     req.Name,
+				Image:    req.Image,
+				PlanName: req.Plan,
+				Username: req.Username,
+				Password: req.Password,
+			}
+
+			if err := mgr.CreateServer(opts); err != nil {
 				http.Error(w, err.Error(), 500)
 				return
 			}
@@ -47,7 +66,7 @@ func Start(mgr *vm.Manager, store *images.Store, port string) {
 		}
 	})
 
-	// 3. VM ACTIONS API (Start/Stop)
+	// 3. ACTION API
 	http.HandleFunc("/api/vms/action", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", 405)
@@ -66,11 +85,11 @@ func Start(mgr *vm.Manager, store *images.Store, port string) {
 		w.WriteHeader(200)
 	})
 
-	fmt.Printf("📡 VPS Control Plane & Webhook running on %s\n", port)
+	fmt.Printf("📡 VPS Control Plane running on %s\n", port)
 	log.Fatal(http.ListenAndServe(port, nil))
 }
 
-// ... (Keep your existing handleImageWebhook helper and toLowerCase helper below) ...
+// ... (Helper functions remain same) ...
 func handleImageWebhook(store *images.Store) http.HandlerFunc {
 	type LegacyImageRelease struct {
 		Distro  string `json:"distro"`
@@ -80,16 +99,13 @@ func handleImageWebhook(store *images.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req LegacyImageRelease
 		json.NewDecoder(r.Body).Decode(&req)
-		logicalName := toLowerCase(fmt.Sprintf("%s-%s", req.Distro, req.Version))
+		logicalName := strings.ToLower(fmt.Sprintf("%s-%s", req.Distro, req.Version))
 
 		fmt.Printf("🔔 Beacon Alert: Update found for '%s'\n", logicalName)
 		store.Register(logicalName, req.URL, "")
 		go func() {
-			fmt.Printf("   -> Triggering background pull for %s...\n", logicalName)
 			store.Resolve(logicalName)
 		}()
 		w.WriteHeader(200)
 	}
 }
-
-func toLowerCase(s string) string { return strings.ToLower(s) }

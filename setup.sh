@@ -1,104 +1,81 @@
 #!/bin/bash
-set -e # Exit immediately if any command fails
+set -e
 
-# Colors
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-RED='\033[0;31m'
-NC='\033[0m'
+echo "🚀 Starting VPS Manager Setup (Rocky Linux 9)..."
 
-echo -e "${BLUE}"
-echo "============================================"
-echo "   🚀 HostPalace VPS Manager Installer      "
-echo "============================================"
-echo -e "${NC}"
+# 1. Install Dependencies
+echo "📦 Installing System Packages..."
+dnf install -y epel-release
+/usr/bin/crb enable
+dnf install -y git wget gcc make qemu-kvm libvirt libvirt-client virt-install virt-viewer genisoimage
 
-# 1. Check Root
-if [ "$EUID" -ne 0 ]; then
-  echo -e "${RED}[ERROR] Please run as root.${NC}"
-  echo "Try: curl -fsSL ... | sudo bash"
+# 2. Create the 'cloud-localds' Fake Script (The Fix)
+echo "🔧 Patching cloud-localds..."
+cat <<EOF > /usr/local/bin/cloud-localds
+#!/bin/bash
+OUTPUT="\$1"
+USER_DATA="\$2"
+META_DATA="\$3"
+
+if [ -z "\$OUTPUT" ] || [ -z "\$USER_DATA" ]; then
+  echo "Usage: cloud-localds <output.iso> <user-data> [meta-data]"
   exit 1
 fi
 
-# 2. Detect OS & Install System Deps
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    OS=$ID
-else
-    echo -e "${RED}[ERROR] Cannot detect OS.${NC}"
-    exit 1
+FILES="\$USER_DATA"
+if [ -n "\$META_DATA" ]; then
+  FILES="\$FILES \$META_DATA"
 fi
 
-echo -e "${GREEN}[+] Detected OS: $OS${NC}"
+genisoimage -output "\$OUTPUT" -volid cidata -joliet -rock \$FILES
+EOF
+chmod +x /usr/local/bin/cloud-localds
 
-case $OS in
-    "almalinux"|"rocky"|"centos"|"fedora"|"rhel")
-        echo -e "${BLUE}[INFO] Installing RHEL dependencies...${NC}"
-        dnf install -y epel-release
-        dnf groupinstall -y "Virtualization Host"
-        dnf install -y virt-install qemu-img bridge-utils wget git genisoimage tar
+# 3. Enable Libvirt
+echo "🔌 Enabling KVM..."
+systemctl enable --now libvirtd
 
-        # Cloud-localds (Manual fetch for RHEL)
-        if [ ! -f /usr/local/bin/cloud-localds ]; then
-            curl -L -o /usr/local/bin/cloud-localds https://raw.githubusercontent.com/canonical/cloud-utils/main/bin/cloud-localds
-            chmod +x /usr/local/bin/cloud-localds
-        fi
-
-        # Firewall
-        echo -e "${BLUE}[INFO] Opening Firewall Ports (5900-5910)...${NC}"
-        firewall-cmd --permanent --add-port=5900-5910/tcp >/dev/null 2>&1 || true
-        firewall-cmd --reload >/dev/null 2>&1 || true
-        systemctl enable --now libvirtd
-        ;;
-    "ubuntu"|"debian")
-        echo -e "${BLUE}[INFO] Installing Debian/Ubuntu dependencies...${NC}"
-        apt-get update -qq
-        apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virtinst cloud-image-utils genisoimage git wget tar
-
-        # Firewall
-        ufw allow 5900:5910/tcp >/dev/null 2>&1 || true
-        ;;
-    *)
-        echo -e "${RED}[ERROR] Unsupported OS: $OS${NC}"
-        exit 1
-        ;;
-esac
-
-# 3. Install Go (if missing)
+# 4. Install Go
 if ! command -v go &> /dev/null; then
-    echo -e "${BLUE}[INFO] Installing Go 1.23.4...${NC}"
-    wget -q https://go.dev/dl/go1.23.4.linux-amd64.tar.gz
-    rm -rf /usr/local/go && tar -C /usr/local -xzf go1.23.4.linux-amd64.tar.gz
-    export PATH=$PATH:/usr/local/go/bin
-else
-    echo -e "${GREEN}[+] Go is already installed.${NC}"
+    echo "🐹 Installing Go..."
+    wget https://go.dev/dl/go1.22.5.linux-amd64.tar.gz -O /tmp/go.tar.gz
+    rm -rf /usr/local/go && tar -C /usr/local -xzf /tmp/go.tar.gz
+    rm -f /tmp/go.tar.gz
 fi
+export PATH=$PATH:/usr/local/go/bin
 
-# 4. Clone, Build & Install
-INSTALL_DIR="/usr/local/src/vps-manager"
-BIN_DIR="/usr/local/bin"
+# 5. Build
+echo "🔨 Building VPS Manager..."
+APP_DIR="/opt/vps-manager"
+rm -rf $APP_DIR
+git clone https://github.com/Shaman786/vps-manager.git $APP_DIR
+cd $APP_DIR
+go mod tidy
+go build -o vps-manager cmd/vps-manager/main.go
+cp vps-manager /usr/local/bin/
 
-echo -e "${BLUE}[INFO] Downloading Source Code...${NC}"
-rm -rf "$INSTALL_DIR"
-git clone https://github.com/shaman786/vps-manager.git "$INSTALL_DIR"
+# 6. Service
+echo "🔥 Starting Service..."
+cat <<EOF > /etc/systemd/system/vps-manager.service
+[Unit]
+Description=VPS Manager Webhook Listener
+After=network.target libvirtd.service
 
-echo -e "${BLUE}[INFO] Building Binary...${NC}"
-cd "$INSTALL_DIR"
-/usr/local/go/bin/go mod tidy
-/usr/local/go/bin/go build -o vps-manager cmd/vps-manager/main.go
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$APP_DIR
+ExecStart=/usr/local/bin/vps-manager listen
+Restart=always
+RestartSec=5
 
-echo -e "${BLUE}[INFO] Installing to $BIN_DIR...${NC}"
-mv vps-manager "$BIN_DIR/"
-chmod +x "$BIN_DIR/vps-manager"
+[Install]
+WantedBy=multi-user.target
+EOF
 
-# 5. Cleanup
-echo -e "${GREEN}[+] Cleanup complete.${NC}"
-cd /root
-rm -rf "$INSTALL_DIR"
+systemctl daemon-reload
+systemctl enable --now vps-manager
+firewall-cmd --permanent --add-port=8080/tcp || true
+firewall-cmd --reload || true
 
-echo -e "${GREEN}"
-echo "============================================"
-echo "   ✅ Installation Complete! "
-echo "============================================"
-echo -e "${NC}"
-echo "Type 'vps-manager' to start."
+echo "✅ God Mode Ready."
