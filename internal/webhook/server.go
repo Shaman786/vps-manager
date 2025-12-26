@@ -7,60 +7,89 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Shaman786/vps-manager/internal/images" // Import the new Store
+	"github.com/Shaman786/vps-manager/internal/images"
 	"github.com/Shaman786/vps-manager/internal/vm"
 )
 
-// Matches the JSON your 'watcher/main.go' is ALREADY sending
-type LegacyImageRelease struct {
-	Distro  string `json:"distro"`  // "Ubuntu"
-	Version string `json:"version"` // "24.04"
-	URL     string `json:"url"`
-}
-
-// Start now accepts the ImageStore instead of just Manager
 func Start(mgr *vm.Manager, store *images.Store, port string) {
-	http.HandleFunc("/webhook", func(w http.ResponseWriter, r *http.Request) {
+	// 1. IMAGE WEBHOOK (Keep this!)
+	http.HandleFunc("/webhook", handleImageWebhook(store))
+
+	// 2. VM LIST & CREATE API (New!)
+	http.HandleFunc("/api/vms", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method == http.MethodGet {
+			// LIST
+			vms, _ := mgr.ListServers()
+			json.NewEncoder(w).Encode(vms)
+			return
+		}
+
+		if r.Method == http.MethodPost {
+			// CREATE
+			var req struct {
+				Name   string `json:"name"`
+				Image  string `json:"image"`
+				Region string `json:"region"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "Invalid JSON", 400)
+				return
+			}
+
+			// Call Manager with the specific image
+			if err := mgr.CreateServer(req.Name, req.Image, req.Region); err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]string{"status": "created", "id": req.Name})
+		}
+	})
+
+	// 3. VM ACTIONS API (Start/Stop)
+	http.HandleFunc("/api/vms/action", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", 405)
 			return
 		}
+		var req struct {
+			ID     string `json:"id"`
+			Action string `json:"action"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
 
-		var req LegacyImageRelease
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", 400)
+		if err := mgr.PerformAction(req.ID, req.Action); err != nil {
+			http.Error(w, err.Error(), 500)
 			return
 		}
+		w.WriteHeader(200)
+	})
 
-		// 1. ADAPT: Create the Logical Name (e.g., "ubuntu-24.04")
-		// We normalize to lowercase to match our registry standards
-		logicalName := fmt.Sprintf("%s-%s", req.Distro, req.Version)
-		logicalName = toLowerCase(logicalName) // helper function or strings.ToLower
+	fmt.Printf("📡 VPS Control Plane & Webhook running on %s\n", port)
+	log.Fatal(http.ListenAndServe(port, nil))
+}
+
+// ... (Keep your existing handleImageWebhook helper and toLowerCase helper below) ...
+func handleImageWebhook(store *images.Store) http.HandlerFunc {
+	type LegacyImageRelease struct {
+		Distro  string `json:"distro"`
+		Version string `json:"version"`
+		URL     string `json:"url"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req LegacyImageRelease
+		json.NewDecoder(r.Body).Decode(&req)
+		logicalName := toLowerCase(fmt.Sprintf("%s-%s", req.Distro, req.Version))
 
 		fmt.Printf("🔔 Beacon Alert: Update found for '%s'\n", logicalName)
-
-		// 2. REGISTER: Update the JSON Registry immediately
-		// We pass "" for checksum for now (Watcher doesn't send it yet)
-		if err := store.Register(logicalName, req.URL, ""); err != nil {
-			http.Error(w, "Registry update failed", 500)
-			return
-		}
-
-		// 3. OPTIONAL: Trigger background download (Cache Warming)
-		// This keeps the webhook fast but starts the work
+		store.Register(logicalName, req.URL, "")
 		go func() {
 			fmt.Printf("   -> Triggering background pull for %s...\n", logicalName)
 			store.Resolve(logicalName)
 		}()
-
 		w.WriteHeader(200)
-		w.Write([]byte("Image registered and pull started"))
-	})
-
-	fmt.Printf("📡 VPS Webhook Listener running on %s\n", port)
-	log.Fatal(http.ListenAndServe(port, nil))
+	}
 }
 
-func toLowerCase(s string) string {
-	return strings.ToLower(s)
-}
+func toLowerCase(s string) string { return strings.ToLower(s) }

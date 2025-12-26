@@ -12,33 +12,48 @@ import (
 )
 
 func main() {
-	// 1. Initialize Image Store (The Database of OS Images)
-	// This handles downloading and caching "ubuntu-24.04", etc.
-	imgStore, err := images.NewStore("/host-data/images/registry.json", "/host-data/images/cache")
+	// 1. SYSTEM PATHS (For Root Usage)
+	// We use a central directory for all VPS data
+	baseDir := "/host-data"
+
+	registryPath := baseDir + "/images/registry.json"
+	cacheDir := baseDir + "/images/cache"
+	vmsDir := baseDir + "/vms"
+	configDir := baseDir + "/configs"
+
+	// 2. Ensure Directories Exist (Auto-Setup)
+	// This prevents "no such file or directory" errors
+	dirs := []string{cacheDir, vmsDir, configDir}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			panic(fmt.Sprintf("❌ Critical Error: Cannot create directory %s. (Did you run with sudo?): %v", dir, err))
+		}
+	}
+
+	// 3. Initialize Image Store
+	imgStore, err := images.NewStore(registryPath, cacheDir)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to init image store: %v", err))
 	}
 
-	// 2. Initialize KVM Driver (The Engine)
-	// This talks to Libvirt/QEMU
+	// 4. Initialize KVM Driver
 	driver := kvm.NewKVMDriver(
 		imgStore,
-		"/host-data/vms",     // DiskDir
-		"/host-data/configs", // ConfigDir
+		vmsDir,
+		configDir,
 	)
 
-	// 3. Initialize Manager (The Brain)
-	// The manager doesn't know about files anymore, it just talks to the driver
+	// 5. Initialize Manager
 	mgr := vm.NewManager(driver)
 
-	// 4. Check Mode: Webhook Listener?
+	// 6. Check Mode: Webhook Listener?
 	if len(os.Args) > 1 && os.Args[1] == "listen" {
 		// Pass the image store to the webhook so it can register new images
 		webhook.Start(mgr, imgStore, ":8080")
 		return
 	}
 
-	// 5. Default Mode: Interactive CLI
+	// 7. Default Mode: Interactive CLI
 	// Pass both manager and store to the CLI
 	app := cli.NewApp(mgr, imgStore)
 	app.ShowMainMenu()

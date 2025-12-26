@@ -137,7 +137,8 @@ func (k *KVMDriver) createCloudInitISO(name, user, meta string) (string, error) 
 
 func (k *KVMDriver) launchWithXML(name string, ramMB, cpu int, disk, iso, bridge string) error {
 	ramKB := ramMB * 1024
-	netXML := fmt.Sprintf("<interface type='network'><source network='default'/><model type='virtio'/></interface>")
+	// netXML := fmt.Sprintf("<interface type='network'><source network='default'/><model type='virtio'/></interface>")
+	netXML := "<interface type='network'><source network='default'/><model type='virtio'/></interface>"
 	if bridge != "default" && bridge != "" {
 		netXML = fmt.Sprintf("<interface type='bridge'><source bridge='%s'/><model type='virtio'/></interface>", bridge)
 	}

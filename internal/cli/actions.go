@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// ... (Keep handleListVMs as is) ...
 func (a *App) handleListVMs() {
 	vms, err := a.mgr.ListServers()
 	if err != nil {
@@ -22,21 +23,26 @@ func (a *App) handleListVMs() {
 
 func (a *App) handleCreateVM() {
 	reader := bufio.NewReader(os.Stdin)
+
 	fmt.Print("Enter VM Name: ")
 	name, _ := reader.ReadString('\n')
 	name = strings.TrimSpace(name)
 
-	// In the new architecture, Image/Size logic is inside Manager or Driver defaults for now
-	// You can expand CreateServer arguments later
-	fmt.Printf("Creating VM '%s' (Standard Plan)...\n", name)
+	fmt.Print("Image (default: ubuntu-24.04): ")
+	image, _ := reader.ReadString('\n')
+	image = strings.TrimSpace(image)
 
-	if err := a.mgr.CreateServer(name, "local"); err != nil {
+	fmt.Printf("Creating VM '%s' using %s...\n", name, image)
+
+	// Update: Pass the image argument
+	if err := a.mgr.CreateServer(name, image, "local"); err != nil {
 		fmt.Printf("❌ Failed: %v\n", err)
 	} else {
 		fmt.Println("✅ VM Created Successfully!")
 	}
 }
 
+// ... (Keep handleControlVM and handleDownloadImage as is) ...
 func (a *App) handleControlVM() {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("VM Name: ")
@@ -55,9 +61,7 @@ func (a *App) handleControlVM() {
 }
 
 func (a *App) handleDownloadImage() {
-	// This replaces the old "EnsureBaseImage" logic
 	reader := bufio.NewReader(os.Stdin)
-
 	fmt.Print("Logical Name (e.g., ubuntu-24.04): ")
 	name, _ := reader.ReadString('\n')
 	name = strings.TrimSpace(name)
@@ -67,14 +71,10 @@ func (a *App) handleDownloadImage() {
 	url = strings.TrimSpace(url)
 
 	fmt.Println("Registering and Fetching...")
-
-	// 1. Register
 	if err := a.store.Register(name, url, ""); err != nil {
 		fmt.Printf("❌ Registration Failed: %v\n", err)
 		return
 	}
-
-	// 2. Trigger Download
 	if _, err := a.store.Resolve(name); err != nil {
 		fmt.Printf("❌ Download Failed: %v\n", err)
 	} else {
